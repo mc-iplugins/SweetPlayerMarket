@@ -36,7 +36,9 @@ import top.mrxiaom.sweet.playermarket.utils.Utils;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.BiConsumer;
 
 public abstract class AbstractGuiSearch extends AbstractGuiModule {
@@ -370,6 +372,26 @@ public abstract class AbstractGuiSearch extends AbstractGuiModule {
         r.add("%outdate_time%", plugin.toString(item.outdateTime()));
         r.add("%can_preview%", item.canItemPreview());
         r.add("%last_trader_uuid%", item.params().getString("last-trader.uuid", ""));
-        r.add("%last_trader_name%", item.params().getString("last-trader.name", Messages.Gui.common__none.str()));
+        String lastTraderName = item.params().getString("last-trader.name", Messages.Gui.common__none.str());
+        String sellReceivedBuyers = getSellReceivedBuyers(item.params(), lastTraderName);
+        r.add("%last_trader_name%", lastTraderName);
+        r.add("%buyer%", sellReceivedBuyers);
+        r.add("%buyers%", sellReceivedBuyers);
+    }
+
+    private static String getSellReceivedBuyers(ConfigurationSection params, String fallback) {
+        Set<String> buyers = new LinkedHashSet<>();
+        for (String buyer : params.getStringList("sell.received-buyers")) {
+            if (buyer != null && !buyer.isEmpty()) {
+                buyers.add(buyer);
+            }
+        }
+        if (buyers.isEmpty() && fallback != null && !fallback.isEmpty()) {
+            buyers.add(fallback);
+        }
+        if (buyers.isEmpty()) {
+            return Messages.Gui.common__none.str();
+        }
+        return String.join(", ", buyers);
     }
 }

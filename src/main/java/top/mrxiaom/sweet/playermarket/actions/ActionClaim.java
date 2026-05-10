@@ -26,7 +26,9 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 public class ActionClaim extends AbstractActionWithMarketItem {
     public static final ActionClaim INSTANCE = new ActionClaim();
@@ -108,8 +110,10 @@ public class ActionClaim extends AbstractActionWithMarketItem {
                     amount = 0;
                 }
                 double money = receivedMoney;
+                String buyers = getSellReceivedBuyers(params);
                 params.set("sell.received-currency", null);
                 params.set("sell.received-count", null);
+                params.set("sell.received-buyers", null);
                 successAction = () -> {
                     if (outdatedReturnAmount > 0) {
                         // 已到期归还商品
@@ -119,7 +123,10 @@ public class ActionClaim extends AbstractActionWithMarketItem {
                         currency.giveMoney(player, money);
                         Messages.Gui.me__claim__sell__success.tm(player,
                                 Pair.of("%money%", plugin.displayNames().formatMoney(money)),
-                                Pair.of("%currency%", currencyName));
+                                Pair.of("%currency%", currencyName),
+                                Pair.of("%buyer%", buyers),
+                                Pair.of("%buyers%", buyers),
+                                Pair.of("%last_trader_name%", buyers));
                     }
                 };
             }
@@ -189,6 +196,25 @@ public class ActionClaim extends AbstractActionWithMarketItem {
         successAction.run();
         gm.doSearch();
         plugin.getScheduler().runTask(gm::open);
+    }
+
+    private static String getSellReceivedBuyers(ConfigurationSection params) {
+        Set<String> buyers = new LinkedHashSet<>();
+        for (String buyer : params.getStringList("sell.received-buyers")) {
+            if (buyer != null && !buyer.isEmpty()) {
+                buyers.add(buyer);
+            }
+        }
+        if (buyers.isEmpty()) {
+            String lastTraderName = params.getString("last-trader.name");
+            if (lastTraderName != null && !lastTraderName.isEmpty()) {
+                buyers.add(lastTraderName);
+            }
+        }
+        if (buyers.isEmpty()) {
+            return Messages.Gui.common__none.str();
+        }
+        return String.join(", ", buyers);
     }
 
     protected static void takeBackSell(MarketItem marketItem, IShopSellConfirmAdapter shopAdapter, Player player, int count) {

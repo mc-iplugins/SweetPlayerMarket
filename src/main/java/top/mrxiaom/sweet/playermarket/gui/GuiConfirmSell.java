@@ -27,6 +27,8 @@ import top.mrxiaom.sweet.playermarket.gui.api.AbstractGuiConfirm;
 import top.mrxiaom.sweet.playermarket.utils.Utils;
 
 import java.sql.Connection;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * 菜单: 出售商店 下单付款
@@ -132,6 +134,9 @@ public class GuiConfirmSell extends AbstractGuiConfirm {
                 params.set("sell.received-currency", old + totalMoney);
                 int oldCount = params.getInt("sell.received-count", 0);
                 params.set("sell.received-count", oldCount + count);
+                List<String> buyers = new ArrayList<>(params.getStringList("sell.received-buyers"));
+                buyers.add(player.getName());
+                params.set("sell.received-buyers", buyers);
 
                 params.set("last-trader.uuid", player.getUniqueId().toString());
                 params.set("last-trader.name", player.getName());
