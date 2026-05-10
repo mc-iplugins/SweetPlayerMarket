@@ -22,6 +22,7 @@ val shadowGroup = "top.mrxiaom.sweet.playermarket.libs"
 val shadowLink = configurations.create("shadowLink")
 
 repositories {
+    mavenLocal()
     mavenCentral()
     maven("https://repo.codemc.io/repository/maven-public/")
     maven("https://hub.spigotmc.org/nexus/content/repositories/snapshots/")
@@ -45,6 +46,7 @@ dependencies {
     compileOnly("org.black_ixx:playerpoints:3.2.7")
     compileOnly(files("libs/MPoints-1.2.2.jar"))
     compileOnly("com.github.nulli0n:ExcellentEconomy:c32f037025") // CoinsEngine
+    compileOnly("pku.yim.dynamicbind:DynamicBindPlus:1.1")
     compileOnly(base.depend.annotations)
     // MythicMobs
     compileOnly("io.lumine:Mythic-Dist:4.13.0")

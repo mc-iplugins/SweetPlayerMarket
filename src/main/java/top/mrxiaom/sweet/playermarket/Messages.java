@@ -143,6 +143,7 @@ public class Messages {
         public static final Message deploy__item_count__prompt_cancel = field("cancel");
         public static final Message deploy__item_count__success = field("&a已设置单份物品数量为 &e%count%");
         public static final Message deploy__item_count__not_number = field("&e请输入一个正确的数量");
+        public static final Message deploy__item_bound = field("&e该物品为绑定物品，无法上架");
 
         public static final Message sell__amount_zero = field("&e请先输入购买数量");
         public static final Message sell__amount_not_enough = field("&e商品库存不足，减少一点购买数量吧~");
@@ -163,7 +164,7 @@ public class Messages {
         public static final Message me__claim__exception = field("&e出现错误，已打印日志到控制台，请联系服务器管理员");
         public static final Message me__claim__plugin_too_old = field("&e这个子服的插件太老了，无法领取这个类型的商品");
         public static final Message me__claim__buy__success = field("&a你已成功领取&e <item>%item%</item>&r&e x%total_count%");
-        public static final Message me__claim__sell__success = field("&a你已成功领取&e %money% %currency%");
+        public static final Message me__claim__sell__success = field("&a你已成功领取&e %money% %currency%&a，购买者: &e%buyers%");
         public static final Message me__claim__submit_failed = field("&e数据库更改提交失败，请联系服务器管理员");
 
         public static final Message me__take_down__exception = field("&e出现错误，已打印日志到控制台，请联系服务器管理员");

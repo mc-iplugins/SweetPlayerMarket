@@ -1,5 +1,6 @@
 package top.mrxiaom.sweet.playermarket.gui.api;
 
+import org.bukkit.Bukkit;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.MemoryConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -12,6 +13,7 @@ import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.jetbrains.annotations.Nullable;
+import pku.yim.dynamicbind.Binder;
 import top.mrxiaom.pluginbase.func.gui.IModifier;
 import top.mrxiaom.pluginbase.func.gui.LoadedIcon;
 import top.mrxiaom.pluginbase.gui.IGuiHolder;
@@ -69,6 +71,7 @@ public class AbstractGuiDeploy extends AbstractGuiModule {
     }
 
     LoadedIcon iconEmptyItem, iconConfirm;
+    private boolean dynamicBindWarned = false;
     List<String> limitMessagesHeader;
     String limitMessagesLine;
     @Override
@@ -128,6 +131,21 @@ public class AbstractGuiDeploy extends AbstractGuiModule {
         IModifier<String> displayModifier = oldName -> Pair.replace(oldName, r);
         IModifier<List<String>> loreModifier = oldLore -> Pair.replace(oldLore, r);
         return icon.generateIcon(player, displayModifier, loreModifier);
+    }
+
+    protected boolean isDynamicBindItem(ItemStack item) {
+        if (!Bukkit.getPluginManager().isPluginEnabled("DynamicBind")) {
+            return false;
+        }
+        try {
+            return Binder.getBindID(item) != null;
+        } catch (Throwable t) {
+            if (!dynamicBindWarned) {
+                dynamicBindWarned = true;
+                warn("调用 DynamicBindPlus 检查绑定物品时出现异常，将暂时跳过绑定物品检测", t);
+            }
+            return false;
+        }
     }
 
     public abstract class DeployGui extends Gui implements IGuiRefreshable, IGuiDeploy {
@@ -337,6 +355,13 @@ public class AbstractGuiDeploy extends AbstractGuiModule {
             event.setCancelled(true);
             if (actionLock) return;
             if (event.getClickedInventory() instanceof PlayerInventory) {
+                if (isDynamicBindItem(currentItem)) {
+                    setSampleItem(null);
+                    updateReplacements();
+                    refreshGui();
+                    Messages.Gui.deploy__item_bound.tm(player);
+                    return;
+                }
                 setSampleItem(currentItem);
                 updateReplacements();
                 refreshGui();
