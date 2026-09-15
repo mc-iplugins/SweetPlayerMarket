@@ -1,6 +1,5 @@
 package top.mrxiaom.sweet.playermarket.gui.api;
 
-import com.ezylang.evalex.Expression;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.MemoryConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -10,11 +9,11 @@ import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import top.mrxiaom.pluginbase.api.IAction;
+import top.mrxiaom.pluginbase.api.InventoryViewAccessor;
 import top.mrxiaom.pluginbase.func.gui.IModifier;
 import top.mrxiaom.pluginbase.func.gui.LoadedIcon;
 import top.mrxiaom.pluginbase.gui.IGuiHolder;
@@ -127,7 +126,7 @@ public abstract class AbstractGuiSearch extends AbstractGuiModule {
                 ShopAdapterRegistry.Entry entry = ShopAdapterRegistry.inst().getByMarketItem(item);
                 entry.updateReplacements(item, player, r);
 
-                IModifier<String> displayModifier = oldName -> Pair.replace(oldName, r);
+                IModifier<String> displayModifier = oldName -> Pair.replace(PAPI.setPlaceholders(player, oldName), r);
                 IModifier<List<String>> loreModifier = oldLore -> {
                     List<String> lore = new ArrayList<>();
                     for (String s : oldLore) {
@@ -142,12 +141,12 @@ public abstract class AbstractGuiSearch extends AbstractGuiModule {
                             }
                             continue;
                         }
-                        lore.add(Pair.replace(s, r));
+                        lore.add(Pair.replace(PAPI.setPlaceholders(player, s), r));
                     }
                     return lore;
                 };
                 LoadedIcon loadedIcon = decideIconByMarketItem(gui, player, item, r);
-                ItemStack icon = loadedIcon.generateIcon(baseItem, player, displayModifier, loreModifier);
+                ItemStack icon = loadedIcon.generateIcon(baseItem, null, displayModifier, loreModifier);
                 icon.setAmount(displayAmount);
                 return entry.postProcessIcon(item, player, r, icon);
             }
@@ -316,15 +315,14 @@ public abstract class AbstractGuiSearch extends AbstractGuiModule {
                 InventoryAction action, ClickType click,
                 InventoryType.SlotType slotType, int slot,
                 ItemStack currentItem, ItemStack cursor,
-                InventoryView view, InventoryClickEvent event
+                InventoryViewAccessor view, InventoryClickEvent event
         ) {
             event.setCancelled(true);
             if (actionLock) return;
             Character clickedId = getClickedId(slot);
             if (clickedId == null) return;
-            checkNeedToLockAction(clickedId);
+            actionLock = true;
             if (clickedId == '物') {
-                actionLock = true;
                 int i = getAppearTimes(clickedId, slot) - 1;
                 MarketItem item = getItem(i);
                 if (item == null) {
@@ -336,24 +334,37 @@ public abstract class AbstractGuiSearch extends AbstractGuiModule {
             if (onClickMainIcons(action, click, slotType, slot, clickedId, view, event)) {
                 return;
             }
-            plugin.getScheduler().runTask(() -> handleOtherClick(click, clickedId));
+            handleOtherClick(click, clickedId);
         }
-
-        protected abstract void checkNeedToLockAction(char id);
 
         protected abstract void onClickMarketItem(
                 InventoryAction action, ClickType click,
                 InventoryType.SlotType slotType, int slot,
                 MarketItem item, int i,
-                InventoryView view, InventoryClickEvent event);
+                InventoryViewAccessor view, InventoryClickEvent event);
 
         protected boolean onClickMainIcons(
                 InventoryAction action, ClickType click,
                 InventoryType.SlotType slotType, int slot,
                 Character clickedId,
-                InventoryView view, InventoryClickEvent event
+                InventoryViewAccessor view, InventoryClickEvent event
         ) {
             return false;
+        }
+
+        @Override
+        public void handleOtherClick(ClickType type, Character id) {
+            if (id != null) {
+                LoadedIcon icon = otherIcons.get(id);
+                if (icon != null) {
+                    plugin.getScheduler().runTask(() -> {
+                        icon.click(player, type);
+                        actionLock = false;
+                    });
+                    return;
+                }
+            }
+            actionLock = false;
         }
 
         protected MarketItem refreshItem(MarketItem item) {

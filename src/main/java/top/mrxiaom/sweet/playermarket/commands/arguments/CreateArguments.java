@@ -1,13 +1,14 @@
 package top.mrxiaom.sweet.playermarket.commands.arguments;
 
-import net.kyori.adventure.text.minimessage.MiniMessage;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.Nullable;
+import top.mrxiaom.pluginbase.api.message.ITagSerializer;
 import top.mrxiaom.pluginbase.utils.AdventureItemStack;
+import top.mrxiaom.pluginbase.utils.AdventureUtil;
 import top.mrxiaom.pluginbase.utils.Pair;
 import top.mrxiaom.pluginbase.utils.arguments.Arguments;
 import top.mrxiaom.sweet.playermarket.Messages;
@@ -24,10 +25,7 @@ import top.mrxiaom.sweet.playermarket.data.limitation.BaseLimitation;
 import top.mrxiaom.sweet.playermarket.data.limitation.CreateCost;
 import top.mrxiaom.sweet.playermarket.database.MarketplaceDatabase;
 import top.mrxiaom.sweet.playermarket.economy.IEconomy;
-import top.mrxiaom.sweet.playermarket.func.ItemSerializerManager;
-import top.mrxiaom.sweet.playermarket.func.LimitationManager;
-import top.mrxiaom.sweet.playermarket.func.NoticeManager;
-import top.mrxiaom.sweet.playermarket.func.OutdateTimeManager;
+import top.mrxiaom.sweet.playermarket.func.*;
 import top.mrxiaom.sweet.playermarket.gui.GuiCreateBuyShop;
 import top.mrxiaom.sweet.playermarket.gui.GuiCreateSellShop;
 import top.mrxiaom.sweet.playermarket.utils.Utils;
@@ -35,6 +33,8 @@ import top.mrxiaom.sweet.playermarket.utils.Utils;
 import java.io.StringReader;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.function.Consumer;
 
 public class CreateArguments extends AbstractArguments<Player> {
@@ -79,10 +79,10 @@ public class CreateArguments extends AbstractArguments<Player> {
             plugin.getScheduler().runTask(() -> {
                 switch (type) {
                     case SELL:
-                        GuiCreateSellShop.create(sender, systemName).open();
+                        GuiCreateSellShop.open(sender, systemName);
                         break;
                     case BUY:
-                        GuiCreateBuyShop.create(sender, systemName).open();
+                        GuiCreateBuyShop.open(sender, systemName);
                         break;
                 }
             });
@@ -224,21 +224,20 @@ public class CreateArguments extends AbstractArguments<Player> {
         // 检查玩家是否有足够的手续费
         double totalPrice = price * marketAmount;
         CreateCost createCost = limitation.getCreateCost(type);
-        IEconomy costCurrency;
-        double createCostMoney;
+        Map<IEconomy, Double> createCostMap = new HashMap<>();
         if (!sender.hasPermission("sweet.playermarket.create.bypass.cost") && createCost != null) {
-            costCurrency = createCost.currency(currency);
-            createCostMoney = createCost.money(totalPrice);
-            if (createCostMoney > 0 && !costCurrency.has(sender, createCostMoney)) {
-                Messages.Command.create__limitation__create_cost_failed.tm(sender,
-                        Pair.of("%currency%", plugin.displayNames().getCurrencyName(costCurrency)),
-                        Pair.of("%money%", plugin.displayNames().formatMoney(createCostMoney)));
-                if (callback != null) callback.accept(null);
-                return;
+            createCost.collectCosts(createCostMap, currency, totalPrice);
+            for (Map.Entry<IEconomy, Double> entry : createCostMap.entrySet()) {
+                IEconomy costCurrency = entry.getKey();
+                double createCostMoney = entry.getValue();
+                if (createCostMoney > 0 && !costCurrency.has(sender, createCostMoney)) {
+                    Messages.Command.create__limitation__create_cost_failed.tm(sender,
+                            Pair.of("%currency%", plugin.displayNames().getCurrencyName(costCurrency)),
+                            Pair.of("%money%", plugin.displayNames().formatMoney(createCostMoney)));
+                    if (callback != null) callback.accept(null);
+                    return;
+                }
             }
-        } else {
-            costCurrency = null;
-            createCostMoney = 0.0;
         }
 
         OutdateTime outdateTime = OutdateTimeManager.inst().get(sender);
@@ -265,9 +264,8 @@ public class CreateArguments extends AbstractArguments<Player> {
                 item, itemCount,
                 marketAmount, type,
                 createCost, currency,
-                totalPrice, createCostMoney,
-                costCurrency, price, outdateTime,
-                callback
+                totalPrice, createCostMap, price,
+                outdateTime, callback
         ));
     }
 
@@ -276,12 +274,17 @@ public class CreateArguments extends AbstractArguments<Player> {
             ItemStack item, int itemCount,
             int marketAmount, EnumMarketType type,
             CreateCost createCost, IEconomy currency,
-            double totalPrice, double createCostMoney,
-            IEconomy costCurrency, double price,
+            double totalPrice, Map<IEconomy, Double> createCostMap, double price,
             OutdateTime outdateTime, @Nullable Consumer<MarketItem> callback
     ) {
         MarketItem marketItem;
         try (Connection conn = plugin.getConnection()) {
+            if (ActiveItemsLimitManager.inst().shouldNotCreateItem(conn, sender, type)) {
+                if (callback != null) {
+                    plugin.getScheduler().runTask(() -> callback.accept(null));
+                }
+                return;
+            }
             MarketplaceDatabase db = plugin.getMarketplace();
             String shopId = db.createNewId(conn);
             if (shopId == null) {
@@ -320,10 +323,7 @@ public class CreateArguments extends AbstractArguments<Player> {
                 }
                 case BUY: {
                     // 收购商店，收取玩家指定类型的货币
-                    double totalMoney = createCost != null && createCost.isTheSameCurrency(currency)
-                            ? (totalPrice + createCostMoney)
-                            : (totalPrice);
-                    if (!currency.has(sender, totalMoney)) {
+                    if (!currency.has(sender, totalPrice)) {
                         Messages.Command.create__buy__no_enough_currency.tm(sender);
                         if (callback != null) {
                             plugin.getScheduler().runTask(() -> callback.accept(null));
@@ -349,8 +349,10 @@ public class CreateArguments extends AbstractArguments<Player> {
             }
 
             // 扣除手续费
-            if (costCurrency != null && createCostMoney > 0) {
-                if (!costCurrency.takeMoney(sender, createCostMoney)) {
+            for (Map.Entry<IEconomy, Double> entry : createCostMap.entrySet()) {
+                IEconomy costCurrency = entry.getKey();
+                double createCostMoney = entry.getValue();
+                if (createCostMoney > 0 && !costCurrency.takeMoney(sender, createCostMoney)) {
                     // TODO: 保持事务一致性
                     Messages.Command.create__limitation__create_cost_failed.tm(sender,
                             Pair.of("%currency%", plugin.displayNames().getCurrencyName(costCurrency)),
@@ -394,8 +396,9 @@ public class CreateArguments extends AbstractArguments<Player> {
         // 通过 BungeeCord 通知其它子服已打开的界面，应该刷新全球市场菜单
         NoticeManager.inst().updateCreated();
         // 提示商品上架成功
-        MiniMessage miniMessage = AdventureItemStack.wrapHoverEvent(item).build();
-        Messages.Command.create__success.tm(miniMessage, sender,
+        ITagSerializer.Builder miniMessage = AdventureUtil.handler().builder();
+        AdventureItemStack.wrapHoverEvent(miniMessage, item);
+        Messages.Command.create__success.tm(miniMessage.build(), sender,
                 Pair.of("%item%", plugin.displayNames().getDisplayName(item, sender)));
 
         plugin.getScheduler().runTask(() -> {

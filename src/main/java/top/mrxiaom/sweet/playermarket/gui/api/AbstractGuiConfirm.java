@@ -8,9 +8,9 @@ import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
-import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.Nullable;
+import top.mrxiaom.pluginbase.api.InventoryViewAccessor;
 import top.mrxiaom.pluginbase.func.gui.IModifier;
 import top.mrxiaom.pluginbase.func.gui.LoadedIcon;
 import top.mrxiaom.pluginbase.gui.IGuiHolder;
@@ -18,6 +18,7 @@ import top.mrxiaom.pluginbase.utils.AdventureItemStack;
 import top.mrxiaom.pluginbase.utils.ListPair;
 import top.mrxiaom.pluginbase.utils.Pair;
 import top.mrxiaom.pluginbase.utils.Util;
+import top.mrxiaom.pluginbase.utils.depend.PAPI;
 import top.mrxiaom.sweet.playermarket.SweetPlayerMarket;
 import top.mrxiaom.sweet.playermarket.data.MarketItem;
 import top.mrxiaom.sweet.playermarket.func.AbstractGuiModule;
@@ -90,7 +91,7 @@ public abstract class AbstractGuiConfirm extends AbstractGuiModule {
             int displayAmount = baseItem.getAmount();
             List<String> itemLore = AdventureItemStack.getItemLoreAsMiniMessage(baseItem);
 
-            IModifier<String> displayModifier = oldName -> Pair.replace(oldName, gui.commonReplacements);
+            IModifier<String> displayModifier = oldName -> Pair.replace(PAPI.setPlaceholders(player, oldName), gui.commonReplacements);
             IModifier<List<String>> loreModifier = oldLore -> {
                 List<String> lore = new ArrayList<>();
                 for (String s : oldLore) {
@@ -105,11 +106,11 @@ public abstract class AbstractGuiConfirm extends AbstractGuiModule {
                         }
                         continue;
                     }
-                    lore.add(Pair.replace(s, gui.commonReplacements));
+                    lore.add(Pair.replace(PAPI.setPlaceholders(player, s), gui.commonReplacements));
                 }
                 return lore;
             };
-            ItemStack icon = iconItem.generateIcon(baseItem, player, displayModifier, loreModifier);
+            ItemStack icon = iconItem.generateIcon(baseItem, null, displayModifier, loreModifier);
             icon.setAmount(displayAmount);
             return entry.postProcessIcon(item, player, gui.commonReplacements, icon);
         }
@@ -191,7 +192,7 @@ public abstract class AbstractGuiConfirm extends AbstractGuiModule {
         @Override
         public void countMinus(int count) {
             int target = count() - count;
-            if (target < 1) {
+            if (target < 1 || getMaxCount() == 0) {
                 countMinusMax();
                 return;
             }
@@ -201,9 +202,15 @@ public abstract class AbstractGuiConfirm extends AbstractGuiModule {
 
         @Override
         public void countMinusMax() {
-            if (count() == 1) return;
-            count(1);
-            refreshGui();
+            if (getMaxCount() == 0) {
+                if (count() == 0) return;
+                count(0);
+                refreshGui();
+            } else {
+                if (count() == 1) return;
+                count(1);
+                refreshGui();
+            }
         }
 
         @Override
@@ -248,13 +255,13 @@ public abstract class AbstractGuiConfirm extends AbstractGuiModule {
                 InventoryAction action, ClickType click,
                 InventoryType.SlotType slotType, int slot,
                 ItemStack currentItem, ItemStack cursor,
-                InventoryView view, InventoryClickEvent event
+                InventoryViewAccessor view, InventoryClickEvent event
         ) {
             event.setCancelled(true);
             if (actionLock) return;
             Character clickedId = getClickedId(slot);
             if (clickedId == null) return;
-            checkNeedToLockAction(clickedId);
+            actionLock = true;
             if (clickedId == '物') {
                 onClickMarketItem(action, click, slotType, slot, view, event);
                 return;
@@ -270,19 +277,13 @@ public abstract class AbstractGuiConfirm extends AbstractGuiModule {
             if (onClickMainIcons(action, click, slotType, slot, clickedId, view, event)) {
                 return;
             }
-            actionLock = true;
-            plugin.getScheduler().runTask(() -> {
-                handleOtherClick(click, clickedId);
-                actionLock = false;
-            });
+            handleOtherClick(click, clickedId);
         }
-
-        protected abstract void checkNeedToLockAction(char id);
 
         protected void onClickMarketItem(
                 InventoryAction action, ClickType click,
                 InventoryType.SlotType slotType, int slot,
-                InventoryView view, InventoryClickEvent event) {
+                InventoryViewAccessor view, InventoryClickEvent event) {
             actionLock = true;
             plugin.getScheduler().runTask(() -> {
                 ListPair<String, Object> r = new ListPair<>();
@@ -295,20 +296,35 @@ public abstract class AbstractGuiConfirm extends AbstractGuiModule {
         protected abstract void onClickConfirm(
                 InventoryAction action, ClickType click,
                 InventoryType.SlotType slotType, int slot,
-                InventoryView view, InventoryClickEvent event);
+                InventoryViewAccessor view, InventoryClickEvent event);
 
         protected abstract void onClickBack(
                 InventoryAction action, ClickType click,
                 InventoryType.SlotType slotType, int slot,
-                InventoryView view, InventoryClickEvent event);
+                InventoryViewAccessor view, InventoryClickEvent event);
 
         protected boolean onClickMainIcons(
                 InventoryAction action, ClickType click,
                 InventoryType.SlotType slotType, int slot,
                 Character clickedId,
-                InventoryView view, InventoryClickEvent event
+                InventoryViewAccessor view, InventoryClickEvent event
         ) {
             return false;
+        }
+
+        @Override
+        public void handleOtherClick(ClickType type, Character id) {
+            if (id != null) {
+                LoadedIcon icon = otherIcons.get(id);
+                if (icon != null) {
+                    plugin.getScheduler().runTask(() -> {
+                        icon.click(player, type);
+                        actionLock = false;
+                    });
+                    return;
+                }
+            }
+            actionLock = false;
         }
     }
 

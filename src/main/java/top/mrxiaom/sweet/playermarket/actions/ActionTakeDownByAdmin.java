@@ -10,6 +10,7 @@ import top.mrxiaom.pluginbase.utils.Pair;
 import top.mrxiaom.sweet.playermarket.Messages;
 import top.mrxiaom.sweet.playermarket.SweetPlayerMarket;
 import top.mrxiaom.sweet.playermarket.data.MarketItem;
+import top.mrxiaom.sweet.playermarket.data.MarketItemBuilder;
 import top.mrxiaom.sweet.playermarket.data.NoticeFlag;
 import top.mrxiaom.sweet.playermarket.database.MarketplaceDatabase;
 import top.mrxiaom.sweet.playermarket.func.NoticeManager;
@@ -18,6 +19,7 @@ import top.mrxiaom.sweet.playermarket.utils.Utils;
 
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.LocalDateTime;
 import java.util.List;
 
 public class ActionTakeDownByAdmin extends AbstractActionWithMarketItem {
@@ -103,18 +105,21 @@ public class ActionTakeDownByAdmin extends AbstractActionWithMarketItem {
             }
 
             // 提交更改到数据库
-            if (!db.modifyItem(conn, marketItem.toBuilder()
+            MarketItemBuilder builder = marketItem.toBuilder()
                     .noticeFlag(hasNotice ? NoticeFlag.NOTHING : NoticeFlag.TAKE_DOWN_BY_ADMIN)
                     .amount(0)
-                    .params(params)
-                    .build()
+                    .params(params);
+            if (plugin.isUpdateOutdateTimeWhenSoldOut()) {
+                builder.outdateTime(LocalDateTime.now());
+            }
+            if (!db.modifyItem(conn, builder.build()
             )) {
                 Messages.Gui.me__take_down__submit_failed.tm(player);
                 return;
             }
         } catch (SQLException e) {
             plugin.warn("管理员 " + player.getName() + " 在下架玩家 " + Messages.getPlayerName(item) + " 的商品 " + item.shopId() + " 时出现异常", e);
-            player.closeInventory();
+            plugin.getScheduler().closeInventory(player);
             Messages.Gui.me__take_down__exception.tm(player);
             return;
         }

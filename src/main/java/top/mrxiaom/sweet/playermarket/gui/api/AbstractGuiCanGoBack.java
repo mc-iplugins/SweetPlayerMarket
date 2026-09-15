@@ -6,8 +6,9 @@ import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
-import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
+import top.mrxiaom.pluginbase.api.InventoryViewAccessor;
+import top.mrxiaom.pluginbase.func.gui.LoadedIcon;
 import top.mrxiaom.pluginbase.gui.IGuiHolder;
 import top.mrxiaom.sweet.playermarket.SweetPlayerMarket;
 import top.mrxiaom.sweet.playermarket.func.AbstractGuiModule;
@@ -59,13 +60,14 @@ public abstract class AbstractGuiCanGoBack extends AbstractGuiModule {
                 InventoryAction action, ClickType click,
                 InventoryType.SlotType slotType, int slot,
                 ItemStack currentItem, ItemStack cursor,
-                InventoryView view, InventoryClickEvent event
+                InventoryViewAccessor view, InventoryClickEvent event
         ) {
             event.setCancelled(true);
             if (actionLock) return;
             Character clickedId = getClickedId(slot);
             if (clickedId == null) return;
-            plugin.getScheduler().runTask(() -> handleOtherClick(click, clickedId));
+            actionLock = true;
+            handleOtherClick(click, clickedId);
         }
 
         @Override
@@ -74,6 +76,21 @@ public abstract class AbstractGuiCanGoBack extends AbstractGuiModule {
                 actionLock = true;
                 plugin.getScheduler().runTask(parent::open);
             }
+        }
+
+        @Override
+        public void handleOtherClick(ClickType type, Character id) {
+            if (id != null) {
+                LoadedIcon icon = otherIcons.get(id);
+                if (icon != null) {
+                    plugin.getScheduler().runTask(() -> {
+                        icon.click(player, type);
+                        actionLock = false;
+                    });
+                    return;
+                }
+            }
+            actionLock = false;
         }
     }
 }

@@ -12,11 +12,14 @@ import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.entity.Player;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.plugin.RegisteredServiceProvider;
+import org.jetbrains.annotations.ApiStatus;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import top.mrxiaom.pluginbase.BukkitPlugin;
 import top.mrxiaom.pluginbase.actions.ActionProviders;
 import top.mrxiaom.pluginbase.api.IAction;
+import top.mrxiaom.pluginbase.api.IRegistry;
+import top.mrxiaom.pluginbase.data.SimpleRegistry;
 import top.mrxiaom.pluginbase.func.LanguageManager;
 import top.mrxiaom.pluginbase.paper.PaperFactory;
 import top.mrxiaom.pluginbase.resolver.DefaultLibraryResolver;
@@ -26,19 +29,18 @@ import top.mrxiaom.pluginbase.utils.Pair;
 import top.mrxiaom.pluginbase.utils.Util;
 import top.mrxiaom.pluginbase.utils.inventory.InventoryFactory;
 import top.mrxiaom.pluginbase.utils.item.ItemEditor;
-import top.mrxiaom.pluginbase.utils.scheduler.FoliaLibScheduler;
 import top.mrxiaom.sweet.playermarket.actions.*;
+import top.mrxiaom.sweet.playermarket.api.HookHandler;
 import top.mrxiaom.sweet.playermarket.api.IEconomyResolver;
 import top.mrxiaom.sweet.playermarket.api.ItemTagResolver;
 import top.mrxiaom.sweet.playermarket.api.MarketAPI;
-import top.mrxiaom.sweet.playermarket.api.item.ItemNameProvider;
-import top.mrxiaom.sweet.playermarket.api.item.ItemProvider;
-import top.mrxiaom.sweet.playermarket.api.item.VanillaItem;
-import top.mrxiaom.sweet.playermarket.api.item.VanillaName;
+import top.mrxiaom.sweet.playermarket.api.hook.OpenGuiHook;
+import top.mrxiaom.sweet.playermarket.api.item.*;
 import top.mrxiaom.sweet.playermarket.data.DisplayNames;
 import top.mrxiaom.sweet.playermarket.data.MarketItem;
 import top.mrxiaom.sweet.playermarket.data.MarketItemBuilder;
 import top.mrxiaom.sweet.playermarket.database.MarketplaceDatabase;
+import top.mrxiaom.sweet.playermarket.database.TradeLogsDatabase;
 import top.mrxiaom.sweet.playermarket.economy.*;
 import top.mrxiaom.sweet.playermarket.func.CurrencyManager;
 import top.mrxiaom.sweet.playermarket.func.I18nManager;
@@ -71,8 +73,6 @@ public class SweetPlayerMarket extends BukkitPlugin {
                 .reconnectDatabaseWhenReloadConfig(false)
                 .scanIgnore("top.mrxiaom.sweet.playermarket.libs")
         );
-        this.scheduler = new FoliaLibScheduler(this);
-
         try {
             //noinspection ResultOfMethodCallIgnored
             getDescription().getLibraries();
@@ -96,7 +96,7 @@ public class SweetPlayerMarket extends BukkitPlugin {
             }
         }
     }
-    private final MarketAPI api = new API();
+    private final API api = new API();
     private final List<IEconomyResolver> economyResolvers = new ArrayList<>();
     private final List<ItemProvider> itemProviders = new ArrayList<>();
     private final List<ItemNameProvider> itemNameProviders = new ArrayList<>();
@@ -108,12 +108,18 @@ public class SweetPlayerMarket extends BukkitPlugin {
     private IEconomyWithSign customEconomy;
     private ItemTagResolver itemTagResolver = item -> "default";
     private MarketplaceDatabase marketplaceDatabase;
+    private TradeLogsDatabase tradeLogsDatabase;
     private DisplayNames displayNames;
     private DateTimeFormatter datetimeFormatter;
     private String datetimeInfinite;
+    private boolean updateOutdateTimeWhenSoldOut;
 
     public boolean isOnlineMode() {
         return onlineMode;
+    }
+
+    public boolean isUpdateOutdateTimeWhenSoldOut() {
+        return updateOutdateTimeWhenSoldOut;
     }
 
     @Nullable
@@ -211,6 +217,11 @@ public class SweetPlayerMarket extends BukkitPlugin {
         return marketplaceDatabase;
     }
 
+    @NotNull
+    public TradeLogsDatabase getTradeLogs() {
+        return tradeLogsDatabase;
+    }
+
     @Override
     public @NotNull ItemEditor initItemEditor() {
         return PaperFactory.createItemEditor();
@@ -229,6 +240,7 @@ public class SweetPlayerMarket extends BukkitPlugin {
         MinecraftVersion.getVersion();
 
         registerItemProvider(VanillaItem.INSTANCE);
+        registerItemProvider(NBTFileItem.INSTANCE);
         registerItemNameProvider(VanillaName.INSTANCE);
         new I18nManager(this);
     }
@@ -236,13 +248,15 @@ public class SweetPlayerMarket extends BukkitPlugin {
     @Override
     protected void beforeEnable() {
         options.registerDatabase(
-                this.marketplaceDatabase = new MarketplaceDatabase(this)
+                this.marketplaceDatabase = new MarketplaceDatabase(this),
+                this.tradeLogsDatabase = new TradeLogsDatabase(this)
         );
 
         LanguageManager.inst()
                 .setLangFile("messages.yml")
                 .register(Messages.class)
                 .register(Messages.Notice.class)
+                .register(Messages.Limited.class)
                 .register(Messages.Command.class)
                 .register(Messages.TabComplete.class)
                 .register(Messages.Gui.class)
@@ -343,12 +357,18 @@ public class SweetPlayerMarket extends BukkitPlugin {
             warn("加载 datetime.format 时发现格式错误，已切换回默认格式");
         }
         datetimeInfinite = config.getString("datetime.infinite", "无期限");
+        updateOutdateTimeWhenSoldOut = config.getBoolean("", true);
     }
 
     @Override
     protected void afterEnable() {
         getMarketplace().fetchAllCountCache();
         getLogger().info("SweetPlayerMarket 加载完毕");
+    }
+
+    @Override
+    protected void afterDisable() {
+        api.openGuiHookRegistry.unregisterAll();
     }
 
     @NotNull
@@ -370,6 +390,10 @@ public class SweetPlayerMarket extends BukkitPlugin {
 
     @Nullable
     public String getOfflineKey(OfflinePlayer player) {
+        Player p = player.getPlayer();
+        if (p != null) {
+            return getKey(p);
+        }
         if (onlineMode) {
             return player.getUniqueId().toString();
         } else {
@@ -412,7 +436,25 @@ public class SweetPlayerMarket extends BukkitPlugin {
     }
 
     public class API implements MarketAPI {
+        IRegistry<HookHandler<OpenGuiHook>> openGuiHookRegistry = new SimpleRegistry<>();
         private API() {}
+
+        @ApiStatus.Internal
+        public void callOpenGuiHook(OpenGuiHook hook) {
+            for (HookHandler<OpenGuiHook> handler : openGuiHookRegistry.all()) {
+                handler.invoke(hook);
+            }
+        }
+
+        @Override
+        public void hookGuiOpen(HookHandler<OpenGuiHook> handler) {
+            openGuiHookRegistry.register(handler);
+        }
+
+        @Override
+        public void unhookGuiOpen(HookHandler<OpenGuiHook> handler) {
+            openGuiHookRegistry.unregister(handler);
+        }
 
         @Override
         public void registerEconomy(IEconomyResolver resolver) {

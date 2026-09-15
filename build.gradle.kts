@@ -9,15 +9,15 @@ plugins {
 
 buildscript {
     repositories.mavenCentral()
-    dependencies.classpath("top.mrxiaom:LibrariesResolver-Gradle:1.7.20")
+    dependencies.classpath("top.mrxiaom:LibrariesResolver-Gradle:1.8.1")
 }
 val base = LibraryHelper(project)
 
-group = "top.mrxiaom.sweet.playermarket"
-version = "1.0.13"
+println("Group:   $group")
+println("Version: $version")
 
 val targetJavaVersion = 8
-val pluginBaseModules = base.modules.run { listOf(library, gui, actions, l10n, commands, paper, misc) }
+val pluginBaseModules = base.modules.run { listOf(library, message, gui, actions, l10n, commands, paper, misc) }
 val shadowGroup = "top.mrxiaom.sweet.playermarket.libs"
 val shadowLink = configurations.create("shadowLink")
 
@@ -42,7 +42,7 @@ dependencies {
 
     compileOnly("com.github.MascusJeoraly:LanguageUtils:1.9")
     compileOnly("net.milkbowl.vault:VaultAPI:1.7")
-    compileOnly("me.clip:placeholderapi:2.11.6")
+    compileOnly("me.clip:placeholderapi:2.12.3")
     compileOnly("org.black_ixx:playerpoints:3.2.7")
     compileOnly(files("libs/MPoints-1.2.2.jar"))
     compileOnly("com.github.nulli0n:ExcellentEconomy:c32f037025") // CoinsEngine
@@ -58,17 +58,17 @@ dependencies {
     // NeigeItems
     compileOnly("pers.neige.neigeitems:NeigeItems:1.21.128")
     // CraftEngine
-    compileOnly("net.momirealms:craft-engine-core:0.0.67")
-    compileOnly("net.momirealms:craft-engine-bukkit:0.0.67")
+    compileOnly("net.momirealms:craft-engine-core:26.8.1")
+    compileOnly("net.momirealms:craft-engine-bukkit:26.8.1")
     // Nexo
     compileOnly("com.nexomc:nexo:1.19.1")
 
-    base.library(LibraryHelper.adventure("4.22.0"))
+    base.library(LibraryHelper.adventure("4.25.0"))
     base.library(base.depend.HikariCP)
+    base.collectPluginHolders()
 
     implementation(base.depend.EvalEx)
-    implementation(base.depend.nbtapi)
-    implementation("com.github.technicallycoded:FoliaLib:0.4.4") { isTransitive = false }
+    implementation("de.tr7zw:item-nbt-api:2.16.0")
     for (artifact in pluginBaseModules) {
         implementation(artifact)
     }
@@ -96,7 +96,6 @@ tasks {
             "top.mrxiaom.pluginbase" to "base",
             "com.ezylang.evalex" to "evalex",
             "de.tr7zw.changeme.nbtapi" to "nbtapi",
-            "com.tcoded.folialib" to "folialib",
         ).forEach { (original, target) ->
             relocate(original, "$shadowGroup.$target")
         }

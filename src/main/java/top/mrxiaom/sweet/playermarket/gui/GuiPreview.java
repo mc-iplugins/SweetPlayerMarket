@@ -10,15 +10,16 @@ import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.inventory.Inventory;
-import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.jetbrains.annotations.Nullable;
+import top.mrxiaom.pluginbase.api.InventoryViewAccessor;
 import top.mrxiaom.pluginbase.func.AutoRegister;
 import top.mrxiaom.pluginbase.func.gui.LoadedIcon;
 import top.mrxiaom.pluginbase.gui.IGuiHolder;
 import top.mrxiaom.pluginbase.utils.ListPair;
 import top.mrxiaom.pluginbase.utils.Pair;
 import top.mrxiaom.sweet.playermarket.SweetPlayerMarket;
+import top.mrxiaom.sweet.playermarket.api.hook.OpenGuiHook;
 import top.mrxiaom.sweet.playermarket.func.AbstractGuiModule;
 import top.mrxiaom.sweet.playermarket.gui.api.IGuiCanGoBack;
 import top.mrxiaom.sweet.playermarket.gui.api.IGuiPageable;
@@ -92,6 +93,13 @@ public class GuiPreview extends AbstractGuiModule {
         return instanceOf(GuiPreview.class);
     }
 
+    public static void open(Player player, IGuiHolder parent, List<ItemStack> items) {
+        OpenGuiHook.ContextPreview context = new OpenGuiHook.ContextPreview(parent, items);
+        if (OpenGuiHook.test(player, context)) {
+            create(player, context.parent(), context.items()).open();
+        }
+    }
+
     public static GuiPreview.Impl create(Player player, IGuiHolder parent, List<ItemStack> items) {
         GuiPreview self = inst();
         return self.new Impl(player, parent, items);
@@ -153,7 +161,7 @@ public class GuiPreview extends AbstractGuiModule {
         }
 
         @Override
-        public void onClick(InventoryAction action, ClickType click, InventoryType.SlotType slotType, int slot, ItemStack currentItem, ItemStack cursor, InventoryView view, InventoryClickEvent event) {
+        public void onClick(InventoryAction action, ClickType click, InventoryType.SlotType slotType, int slot, ItemStack currentItem, ItemStack cursor, InventoryViewAccessor view, InventoryClickEvent event) {
             event.setCancelled(true);
             if (actionLock) return;
             Character clickedId = getClickedId(slot);
@@ -166,7 +174,7 @@ public class GuiPreview extends AbstractGuiModule {
             if (parent != null) {
                 plugin.getScheduler().runTask(parent::open);
             } else {
-                player.closeInventory();
+                plugin.getScheduler().closeInventory(player);
             }
         }
     }

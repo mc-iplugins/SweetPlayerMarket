@@ -9,19 +9,21 @@ import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
-import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
 import org.jetbrains.annotations.Nullable;
 import pku.yim.dynamicbind.Binder;
+import top.mrxiaom.pluginbase.api.InventoryViewAccessor;
 import top.mrxiaom.pluginbase.func.gui.IModifier;
 import top.mrxiaom.pluginbase.func.gui.LoadedIcon;
 import top.mrxiaom.pluginbase.gui.IGuiHolder;
 import top.mrxiaom.pluginbase.utils.ListPair;
 import top.mrxiaom.pluginbase.utils.Pair;
 import top.mrxiaom.pluginbase.utils.Util;
+import top.mrxiaom.pluginbase.utils.depend.PAPI;
 import top.mrxiaom.sweet.playermarket.Messages;
 import top.mrxiaom.sweet.playermarket.SweetPlayerMarket;
+import top.mrxiaom.sweet.playermarket.data.DisplayNames;
 import top.mrxiaom.sweet.playermarket.data.EnumMarketType;
 import top.mrxiaom.sweet.playermarket.data.limitation.BaseLimitation;
 import top.mrxiaom.sweet.playermarket.data.limitation.CreateCost;
@@ -31,8 +33,7 @@ import top.mrxiaom.sweet.playermarket.func.LimitationManager;
 import top.mrxiaom.sweet.playermarket.utils.Utils;
 
 import java.io.File;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 import java.util.function.BiConsumer;
 
 public class AbstractGuiDeploy extends AbstractGuiModule {
@@ -74,6 +75,9 @@ public class AbstractGuiDeploy extends AbstractGuiModule {
     private boolean dynamicBindWarned = false;
     List<String> limitMessagesHeader;
     String limitMessagesLine;
+    String createCostsOldSeparator;
+    List<String> createCostsHeader;
+    String createCostsLine;
     @Override
     protected void loadMainIcon(ConfigurationSection section, String id, LoadedIcon icon) {
         if (id.equals("物")) {
@@ -83,6 +87,9 @@ public class AbstractGuiDeploy extends AbstractGuiModule {
             iconConfirm = icon;
             limitMessagesHeader = section.getStringList(id + ".limit-messages.header");
             limitMessagesLine = section.getString(id + ".limit-messages.line", "  %message%  ");
+            createCostsOldSeparator = section.getString(id + ".create-costs.old-separator", "&7, &e");
+            createCostsHeader = section.getStringList(id + ".create-costs.header");
+            createCostsLine = section.getString(id + ".create-costs.line", " &l &r&7▶ &e%money% %currency%");
         }
     }
 
@@ -93,33 +100,52 @@ public class AbstractGuiDeploy extends AbstractGuiModule {
             ItemStack sampleItem = gui.sampleItem;
             ListPair<String, Object> r = gui.commonReplacements;
             if (sampleItem == null) {
-                IModifier<String> displayModifier = oldName -> Pair.replace(oldName, r);
-                IModifier<List<String>> loreModifier = oldLore -> Pair.replace(oldLore, r);
+                IModifier<String> displayModifier = oldName -> Pair.replace(PAPI.setPlaceholders(player, oldName), r);
+                IModifier<List<String>> loreModifier = oldLore -> Pair.replace(PAPI.setPlaceholders(player, oldLore), r);
                 return iconEmptyItem.generateIcon(player, displayModifier, loreModifier);
             }
             return sampleItem; // TODO: 支持修改样例物品的 lore 等格式
         }
         if (id == '确') {
             ListPair<String, Object> r = gui.commonReplacements;
-            IModifier<String> displayModifier = oldName -> Pair.replace(oldName, r);
+            IModifier<String> displayModifier = oldName -> Pair.replace(PAPI.setPlaceholders(player, oldName), r);
             IModifier<List<String>> loreModifier = oldLore -> {
                 List<String> lore = new ArrayList<>();
                 for (String s : oldLore) {
                     if (s.equals("limit messages")) {
                         List<String> messages = gui.getLimitMessages();
                         if (!messages.isEmpty()) {
-                            lore.addAll(limitMessagesHeader);
+                            lore.addAll(PAPI.setPlaceholders(player, limitMessagesHeader));
                             for (String message : messages) {
-                                lore.add(limitMessagesLine.replace("%message%", message));
+                                lore.add(PAPI.setPlaceholders(player, limitMessagesLine).replace("%message%", message));
                             }
                         }
                         continue;
                     }
-                    lore.add(s);
+                    if (s.equals("create costs")) {
+                        CreateCost createCost = gui.createCost;
+                        double totalMoney = gui.amount * gui.price;
+                        lore.addAll(PAPI.setPlaceholders(player, createCostsHeader));
+                        DisplayNames displayNames = DisplayNames.inst();
+                        Map<IEconomy, Double> costMap = new HashMap<>();
+                        if (createCost != null && !player.hasPermission("sweet.playermarket.create.bypass.cost")) {
+                            createCost.collectCosts(costMap, gui.currency, totalMoney);
+                        }
+                        costMap.forEach((currency, moneyValue) -> {
+                            ListPair<String, Object> r1 = new ListPair<>();
+                            String currencyName = displayNames.getCurrencyName(currency);
+                            String money = displayNames.formatMoney(moneyValue);
+                            r1.add(Pair.of("%currency%", currencyName));
+                            r1.add(Pair.of("%money%", money));
+                            lore.add(Pair.replace(createCostsLine, r1));
+                        });
+                        continue;
+                    }
+                    lore.add(PAPI.setPlaceholders(player, s));
                 }
                 return Pair.replace(lore, r);
             };
-            return iconConfirm.generateIcon(player, displayModifier, loreModifier);
+            return iconConfirm.generateIcon(null, displayModifier, loreModifier);
         }
         return null;
     }
@@ -318,31 +344,28 @@ public class AbstractGuiDeploy extends AbstractGuiModule {
             }
             this.limitMessages = limitMessages;
 
-            if (createCost == null) {
+            if (createCost == null || player.hasPermission("sweet.playermarket.create.bypass.cost")) {
                 r.add("%create_cost_money%", Messages.Gui.common__none.str());
-                r.add("%create_cost_currency%", "");
+                r.add("%create_cost_status%", Messages.Gui.common__none.str());
             } else {
-                IEconomy createCostCurrency;
-                Double createCostMoney;
-                if (!player.hasPermission("sweet.playermarket.create.bypass.cost") && createCost != null) {
-                    createCostCurrency = createCost.currency(currency);
-                    createCostMoney = createCost.money(totalMoney);
-                    if (createCostMoney > 0 && !createCostCurrency.has(player, createCostMoney)) {
-                        createCostCurrency = null;
-                        createCostMoney = null;
-                    }
-                } else {
-                    createCostCurrency = null;
-                    createCostMoney = 0.0;
+                // 兼容旧的配置
+                Map<IEconomy, Double> costMap = new HashMap<>();
+                if (createCost != null) {
+                    createCost.collectCosts(costMap, currency, totalMoney);
                 }
-                if (createCostMoney != null) {
-                    r.add("%create_cost_money%", plugin.displayNames().formatMoney(createCostMoney));
-                    r.add("%create_cost_currency%", createCostCurrency == null ? "" : plugin.displayNames().getCurrencyName(createCostCurrency));
-                } else {
-                    r.add("%create_cost_money%", Messages.Gui.common__none.str());
-                    r.add("%create_cost_currency%", "");
+                DisplayNames displayNames = DisplayNames.inst();
+                StringJoiner joiner = new StringJoiner(createCostsOldSeparator);
+                for (Map.Entry<IEconomy, Double> entry : costMap.entrySet()) {
+                    IEconomy costCurrency = entry.getKey();
+                    Double moneyValue = entry.getValue();
+                    String currencyName = displayNames.getCurrencyName(costCurrency);
+                    String money = displayNames.formatMoney(moneyValue);
+                    joiner.add(money + " " + currencyName);
                 }
+                r.add("%create_cost_money%", joiner.toString());
+                r.add("%create_cost_status%", "");
             }
+            r.add("%create_cost_currency%", "");
         }
 
         @Override
@@ -350,7 +373,7 @@ public class AbstractGuiDeploy extends AbstractGuiModule {
                 InventoryAction action, ClickType click,
                 InventoryType.SlotType slotType, int slot,
                 ItemStack currentItem, ItemStack cursor,
-                InventoryView view, InventoryClickEvent event
+                InventoryViewAccessor view, InventoryClickEvent event
         ) {
             event.setCancelled(true);
             if (actionLock) return;
@@ -369,7 +392,7 @@ public class AbstractGuiDeploy extends AbstractGuiModule {
             }
             Character clickedId = getClickedId(slot);
             if (clickedId == null) return;
-            checkNeedToLockAction(clickedId);
+            actionLock = true;
             if (clickedId == '确') {
                 onClickConfirm(action, click, slotType, slot, view, event);
                 return;
@@ -377,23 +400,36 @@ public class AbstractGuiDeploy extends AbstractGuiModule {
             if (onClickMainIcons(action, click, slotType, slot, clickedId, view, event)) {
                 return;
             }
-            plugin.getScheduler().runTask(() -> handleOtherClick(click, clickedId));
+            handleOtherClick(click, clickedId);
         }
-
-        protected abstract void checkNeedToLockAction(char id);
 
         protected abstract void onClickConfirm(
                 InventoryAction action, ClickType click,
                 InventoryType.SlotType slotType, int slot,
-                InventoryView view, InventoryClickEvent event);
+                InventoryViewAccessor view, InventoryClickEvent event);
 
         protected boolean onClickMainIcons(
                 InventoryAction action, ClickType click,
                 InventoryType.SlotType slotType, int slot,
                 Character clickedId,
-                InventoryView view, InventoryClickEvent event
+                InventoryViewAccessor view, InventoryClickEvent event
         ) {
             return false;
+        }
+
+        @Override
+        public void handleOtherClick(ClickType type, Character id) {
+            if (id != null) {
+                LoadedIcon icon = otherIcons.get(id);
+                if (icon != null) {
+                    plugin.getScheduler().runTask(() -> {
+                        icon.click(player, type);
+                        actionLock = false;
+                    });
+                    return;
+                }
+            }
+            actionLock = false;
         }
     }
 }

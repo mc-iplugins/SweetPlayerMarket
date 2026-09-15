@@ -131,13 +131,13 @@ public class ActionDeployCount implements IAction {
                 IGuiHolder gui = manager.getOpeningGui(player);
                 if (gui instanceof IGuiDeploy) {
                     IGuiDeploy deploy = (IGuiDeploy) gui;
-                    player.closeInventory();
+                    scheduler.closeInventory(player);
                     String cancel = messageCancel.str();
                     messagePrompt.tm(player, Pair.of("%cancel%", cancel));
                     Prompter.chat(player, cancel, str -> {
                         int v = Util.parseInt(str).orElse(0);
                         if (v > 0) {
-                            messageSuccess.tm(player, Pair.of("%money%", v));
+                            messageSuccess.tm(player, Pair.of("%money%", v), Pair.of("%count%", v));
                             impl.accept(deploy, v);
                         } else {
                             messageNotNumber.tm(player);

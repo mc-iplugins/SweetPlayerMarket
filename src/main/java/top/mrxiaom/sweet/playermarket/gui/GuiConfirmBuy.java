@@ -8,17 +8,21 @@ import org.bukkit.event.inventory.ClickType;
 import org.bukkit.event.inventory.InventoryAction;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
-import org.bukkit.inventory.InventoryView;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.PlayerInventory;
+import top.mrxiaom.pluginbase.api.InventoryViewAccessor;
+import top.mrxiaom.pluginbase.api.message.ITagSerializer;
 import top.mrxiaom.pluginbase.func.AutoRegister;
 import top.mrxiaom.pluginbase.utils.AdventureItemStack;
+import top.mrxiaom.pluginbase.utils.AdventureUtil;
 import top.mrxiaom.pluginbase.utils.Pair;
 import top.mrxiaom.sweet.playermarket.Messages;
 import top.mrxiaom.sweet.playermarket.SweetPlayerMarket;
 import top.mrxiaom.sweet.playermarket.api.IShopBuyConfirmAdapter;
 import top.mrxiaom.sweet.playermarket.api.event.MarketConfirmBuyEvent;
+import top.mrxiaom.sweet.playermarket.api.hook.OpenGuiHook;
 import top.mrxiaom.sweet.playermarket.data.MarketItem;
+import top.mrxiaom.sweet.playermarket.data.MarketItemBuilder;
 import top.mrxiaom.sweet.playermarket.data.NoticeFlag;
 import top.mrxiaom.sweet.playermarket.database.MarketplaceDatabase;
 import top.mrxiaom.sweet.playermarket.economy.IEconomy;
@@ -28,6 +32,7 @@ import top.mrxiaom.sweet.playermarket.gui.api.AbstractGuiConfirm;
 import top.mrxiaom.sweet.playermarket.utils.Utils;
 
 import java.sql.Connection;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -42,6 +47,13 @@ public class GuiConfirmBuy extends AbstractGuiConfirm {
 
     public static GuiConfirmBuy inst() {
         return instanceOf(GuiConfirmBuy.class);
+    }
+
+    public static void open(Player player, GuiMarketplace.Impl parent, MarketItem marketItem) {
+        OpenGuiHook.ContextConfirmBuy context = new OpenGuiHook.ContextConfirmBuy(parent, marketItem);
+        if (OpenGuiHook.test(player, context)) {
+            create(player, context.parent(), context.marketItem()).open();
+        }
     }
 
     public static Impl create(Player player, GuiMarketplace.Impl parent, MarketItem marketItem) {
@@ -72,17 +84,10 @@ public class GuiConfirmBuy extends AbstractGuiConfirm {
         }
 
         @Override
-        protected void checkNeedToLockAction(char id) {
-            if (id == '确' || id == '返') {
-                actionLock = true;
-            }
-        }
-
-        @Override
         protected void onClickConfirm(
                 InventoryAction action, ClickType click,
                 InventoryType.SlotType slotType, int slot,
-                InventoryView view, InventoryClickEvent event
+                InventoryViewAccessor view, InventoryClickEvent event
         ) {
             actionLock = true;
             if (count <= 0) {
@@ -174,19 +179,24 @@ public class GuiConfirmBuy extends AbstractGuiConfirm {
                 params.set("last-trader.name", player.getName());
 
                 // 提交更改到数据库
-                MarketItem build = marketItem.toBuilder()
+                MarketItemBuilder builder = marketItem.toBuilder()
                         .noticeFlag(NoticeFlag.CAN_CLAIM_ITEMS)
                         .amount(finalAmount)
-                        .params(params)
+                        .params(params);
+                if (finalAmount == 0 && plugin.isUpdateOutdateTimeWhenSoldOut()) {
+                    builder.outdateTime(LocalDateTime.now());
+                }
+                MarketItem build = builder
                         .build();
                 if (!db.modifyItem(conn, build
                 )) {
                     Messages.Gui.buy__submit_failed.tm(player);
                     return;
                 }
+                plugin.getTradeLogs().put(conn, build, player, count, LocalDateTime.now());
             } catch (Throwable e) {
                 warn("玩家 " + player.getName() + " 在下单 " + Messages.getPlayerName(this.marketItem) + " 的收购商品 " + this.marketItem.shopId() + " 时出现异常", e);
-                player.closeInventory();
+                plugin.getScheduler().closeInventory(player);
                 Messages.Gui.buy__exception.tm(player);
                 return;
             }
@@ -194,8 +204,9 @@ public class GuiConfirmBuy extends AbstractGuiConfirm {
             currency.giveMoney(player, totalMoney);
             // 获取物品名，提示玩家卖出成功
             ItemStack itemDisplay = marketItem.item();
-            MiniMessage miniMessage = AdventureItemStack.wrapHoverEvent(itemDisplay).build();
-            Messages.Gui.buy__success.tm(miniMessage, player,
+            ITagSerializer.Builder miniMessage = AdventureUtil.handler().builder();
+            AdventureItemStack.wrapHoverEvent(miniMessage, itemDisplay);
+            Messages.Gui.buy__success.tm(miniMessage.build(), player,
                     Pair.of("%item%", plugin.displayNames().getDisplayName(itemDisplay, player)),
                     Pair.of("%total_count%", totalCount),
                     Pair.of("%money%", plugin.displayNames().formatMoney(totalMoney)),
@@ -215,7 +226,7 @@ public class GuiConfirmBuy extends AbstractGuiConfirm {
         protected void onClickBack(
                 InventoryAction action, ClickType click,
                 InventoryType.SlotType slotType, int slot,
-                InventoryView view, InventoryClickEvent event
+                InventoryViewAccessor view, InventoryClickEvent event
         ) {
             actionLock = true;
             plugin.getScheduler().runTaskAsync(() -> {
