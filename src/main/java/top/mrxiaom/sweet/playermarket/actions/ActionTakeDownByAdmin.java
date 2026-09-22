@@ -89,24 +89,37 @@ public class ActionTakeDownByAdmin extends AbstractActionWithMarketItem {
             ConfigurationSection params = marketItem.params();
             params.set("take-down-by", player.getName());
 
-            // 如果玩家在线，当场提醒他；不在线就下次上线再提醒
-            boolean hasNotice;
             String key = item.playerId();
-            if (key.equals("#server#")) {
-                hasNotice = true;
+            // 系统商品没有店主，无法接收已成交但尚未领取的物品或货币
+            boolean isServerItem = key.equals("#server#");
+            Player owner = isServerItem ? null : plugin.getPlayer(key);
+            boolean hasReceived = !isServerItem && ActionTakeDown.hasReceivedData(marketItem);
+            // 店主在线时，当场归还已成交但尚未领取的物品或货币，避免下架后这些内容丢失
+            boolean receivedOk = owner != null && ActionTakeDown.takeDownReceived(marketItem, owner);
+
+            NoticeFlag noticeFlag;
+            if (isServerItem) {
+                // 系统商品无需提醒，也没有可领取的内容
+                noticeFlag = NoticeFlag.NOTHING;
+            } else if (hasReceived && !receivedOk) {
+                // 店主离线，或者店主在线但结算失败，保留可领取状态，让店主自行领取
+                noticeFlag = NoticeFlag.CAN_CLAIM_ITEMS;
+            } else if (receivedOk) {
+                // 店主在线，已结清所有未领取的内容
+                noticeFlag = NoticeFlag.NOTHING;
             } else {
-                Player owner = plugin.getPlayer(key);
-                if (owner != null) {
-                    hasNotice = true;
-                    noticeManager.takeDownByAdminNotice(item, owner);
-                } else {
-                    hasNotice = false;
-                }
+                // 没有未领取的内容，只提醒店主商品被管理员下架
+                noticeFlag = NoticeFlag.TAKE_DOWN_BY_ADMIN;
+            }
+
+            // 店主在线时，当场提醒他商品已被下架
+            if (owner != null) {
+                noticeManager.takeDownByAdminNotice(item, owner);
             }
 
             // 提交更改到数据库
             MarketItemBuilder builder = marketItem.toBuilder()
-                    .noticeFlag(hasNotice ? NoticeFlag.NOTHING : NoticeFlag.TAKE_DOWN_BY_ADMIN)
+                    .noticeFlag(noticeFlag)
                     .amount(0)
                     .params(params);
             if (plugin.isUpdateOutdateTimeWhenSoldOut()) {
